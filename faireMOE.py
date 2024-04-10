@@ -110,9 +110,11 @@ class MultiHeadAttention(nn.Module):
         out = self.dropout(self.proj(out))
         return out
 
+# Expert Module
 class Expert(nn.Module):
     """
     Expert is a Linear layer with non-lineariy
+    HOW THIS MODULE WORK?????
     """
     def __init__(self, n_embed):
         super().__init__()
@@ -125,4 +127,33 @@ class Expert(nn.Module):
         
     def forward(self, x):
         return self.net(x)
+    
+class NoisyTopKRouter(nn.Module):
+    def __init__(self, n_embed, num_experts, top_k):
+        super(NoisyTopKRouter, self).__init__()
+        self.top_k = top_k # I guess probably is 2.
+        # Linear x -> X
+        self.topkroute_linear = nn.Linear(n_embed, num_experts)
+        self.noise_linear = nn.Linear(n_embed, num_experts)
+
+    def forward(self, mh_output):
+        # mh_output : Multi-head block's output
+        logits = self.topkroute_linear(mh_output) # linear_layer
+
+        # Noise logits
+        noise_logits = self.noise_linear(mh_output) # linear_layer
+
+        # Add scaled unit gaussian noise to logits
+        # noise is a tensor with the same shape with logits
+        # F.softplus is an Activation Function
+        noise = torch.randn_like(logits)*F.softplus(noise_logits)
+        noisy_logits = logits + noise # Then we have a noise tensor have num_expert shape.
+
+        # SAVE POINT 
+
+        top_k_logits, indices = noisy_logits.topk(self.top_k, dim = -1)
+        zeros = torch.full_like(noisy_logits,float('-inf'))
+        sparse_logits = zeros.scatter(-1, indices, top_k_logits)
+        router_output = F.softmax(sparse_logits, dim=-1)
+        return router_output, indices
     
